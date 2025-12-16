@@ -5,7 +5,29 @@ import { Dashboard } from './components/Dashboard';
 import { TransactionForm } from './components/TransactionForm';
 import { CategoryManager } from './components/CategoryManager';
 import { AiAdvisor } from './components/AiAdvisor';
-import { Plus, Settings, List, LayoutDashboard, ChevronLeft, ChevronRight, Trash2, Loader2, Database, AlertTriangle } from 'lucide-react';
+import { Plus, Settings, List, LayoutDashboard, ChevronLeft, ChevronRight, Trash2, Loader2, Database, AlertTriangle, Edit2, CheckCircle2, CircleDashed } from 'lucide-react';
+
+// Helper to extract error message safely
+const getErrorMessage = (error: any): string => {
+  if (!error) return "Erro desconhecido";
+  if (typeof error === 'string') return error;
+  if (error instanceof Error) return error.message;
+  
+  // Supabase/Postgres specific fields
+  if (error.message) return String(error.message);
+  if (error.error_description) return String(error.error_description);
+  if (error.details) return String(error.details);
+  
+  // JSON Fallback
+  try {
+    const json = JSON.stringify(error, null, 2);
+    if (json && json !== '{}') return json;
+  } catch (e) {
+    // ignore
+  }
+  
+  return String(error); // Last resort
+};
 
 const App: React.FC = () => {
   // State
@@ -18,6 +40,7 @@ const App: React.FC = () => {
   // UI State
   const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'TRANSACTIONS'>('DASHBOARD');
   const [showTransForm, setShowTransForm] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [showCatManager, setShowCatManager] = useState(false);
 
   // Initialization - Load from Supabase
@@ -79,19 +102,67 @@ const App: React.FC = () => {
     }
   };
 
-  // Add transaction wrapper
-  const handleAddTransaction = async (baseT: Omit<Transaction, 'id'>, installments: number) => {
-    const newTransactions: Transaction[] = [];
-    const baseDate = new Date(baseT.date);
+  // Add/Edit transaction wrapper
+  const handleSaveTransaction = async (baseT: Omit<Transaction, 'id'> | Transaction, installments: number, isEditing: boolean) => {
+    
+    if (isEditing && 'id' in baseT) {
+      // Logic for Editing
+      const existingT = transactions.find(t => t.id === (baseT as Transaction).id);
+      // Mescla os dados existentes (para manter campos como parcelas) com os editados
+      const updatedT: Transaction = { ...existingT!, ...(baseT as Transaction) };
+      
+      const oldTransactions = [...transactions];
+      setTransactions(transactions.map(t => t.id === updatedT.id ? updatedT : t)); // Optimistic
 
+      try {
+        await api.updateTransaction(updatedT);
+      } catch (error: any) {
+        console.error("Erro ao atualizar transação:", error);
+        const errorMsg = getErrorMessage(error);
+        const lowerMsg = errorMsg.toLowerCase();
+        
+        // Check for common schema errors
+        if (lowerMsg.includes('status') || lowerMsg.includes('column') || lowerMsg.includes('does not exist')) {
+           alert(
+             "ERRO DE BANCO DE DADOS (Schema Desatualizado):\n\n" +
+             "O Supabase rejeitou a atualização porque faltam colunas na tabela.\n\n" +
+             "SOLUÇÃO:\n" +
+             "1. Vá no Supabase > SQL Editor\n" +
+             "2. Execute:\n\n" +
+             "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS status text DEFAULT 'COMPLETED';\n" +
+             "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS installment_current integer;\n" +
+             "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS installment_total integer;\n"
+           );
+        } else {
+           alert(`Erro ao atualizar no banco: ${errorMsg}`);
+        }
+        setTransactions(oldTransactions);
+      }
+      return;
+    }
+
+    // Logic for Creating (with optional installments)
+    const newTransactions: Transaction[] = [];
+    
+    // Safer Date Math to avoid timezone issues with `new Date()`
+    const [y, m, d] = baseT.date.split('-').map(Number);
+    
     for (let i = 0; i < installments; i++) {
-      const date = new Date(baseDate);
-      date.setMonth(date.getMonth() + i);
+      // Create new date by manipulating month integer
+      const newMonth = m - 1 + i; // 0-indexed month
+      const targetDate = new Date(y, newMonth, d);
+      
+      // Format back to YYYY-MM-DD manually to match local time expectation
+      const yearStr = targetDate.getFullYear();
+      const monthStr = String(targetDate.getMonth() + 1).padStart(2, '0');
+      const dayStr = String(targetDate.getDate()).padStart(2, '0');
+      const dateStr = `${yearStr}-${monthStr}-${dayStr}`;
 
       const transaction: Transaction = {
-        ...baseT,
+        ...(baseT as Omit<Transaction, 'id'>),
         id: crypto.randomUUID(),
-        date: date.toISOString().split('T')[0],
+        date: dateStr,
+        status: i === 0 ? baseT.status : 'PENDING', // First follows selection, others are Pending
         installmentCurrent: installments > 1 ? i + 1 : undefined,
         installmentTotal: installments > 1 ? installments : undefined,
       };
@@ -103,9 +174,26 @@ const App: React.FC = () => {
 
     try {
       await api.addTransactions(newTransactions);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Erro ao salvar transação:", error);
-      alert("Erro ao salvar no banco.");
+      const errorMsg = getErrorMessage(error);
+      const lowerMsg = errorMsg.toLowerCase();
+      
+      // Check for common schema errors
+      if (lowerMsg.includes('status') || lowerMsg.includes('column') || lowerMsg.includes('does not exist')) {
+        alert(
+          "ERRO DE BANCO DE DADOS (Schema Desatualizado):\n\n" +
+          "O Supabase rejeitou a gravação porque faltam colunas na tabela.\n\n" +
+          "SOLUÇÃO:\n" +
+          "1. Vá no Supabase > SQL Editor\n" +
+          "2. Execute:\n\n" +
+          "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS status text DEFAULT 'COMPLETED';\n" +
+          "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS installment_current integer;\n" +
+          "ALTER TABLE transactions ADD COLUMN IF NOT EXISTS installment_total integer;\n"
+        );
+       } else {
+          alert(`Erro ao salvar no banco: ${errorMsg}`);
+       }
       setTransactions(oldTransactions);
     }
   };
@@ -123,6 +211,11 @@ const App: React.FC = () => {
       }
   };
 
+  const openEditModal = (t: Transaction) => {
+    setEditingTransaction(t);
+    setShowTransForm(true);
+  };
+
   // Date Navigation
   const changeMonth = (offset: number) => {
     const newDate = new Date(selectedDate);
@@ -134,15 +227,24 @@ const App: React.FC = () => {
   
   // Calculate Summary Data
   const summary: FinancialSummary = useMemo(() => {
-    const startOfMonth = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), 1);
-    
+    // Filter transactions for the selected month using STRING PARSING
+    // This avoids timezone issues where '2023-10-01' becomes '2023-09-30' due to local timezone
     const filtered = transactions.filter(t => {
-      const d = new Date(t.date);
-      return d.getMonth() === selectedDate.getMonth() && d.getFullYear() === selectedDate.getFullYear();
+      if (!t.date) return false;
+      const [yearStr, monthStr] = t.date.split('-');
+      const year = parseInt(yearStr);
+      const month = parseInt(monthStr) - 1; // JS months are 0-indexed
+      
+      return month === selectedDate.getMonth() && year === selectedDate.getFullYear();
     });
 
+    // Totals (Projected - includes PENDING and COMPLETED)
     const income = filtered.filter(t => t.type === 'INCOME').reduce((acc, t) => acc + t.amount, 0);
     const expense = filtered.filter(t => t.type === 'EXPENSE').reduce((acc, t) => acc + t.amount, 0);
+
+    // Realized (Only COMPLETED)
+    const realizedIncome = filtered.filter(t => t.type === 'INCOME' && t.status === 'COMPLETED').reduce((acc, t) => acc + t.amount, 0);
+    const realizedExpense = filtered.filter(t => t.type === 'EXPENSE' && t.status === 'COMPLETED').reduce((acc, t) => acc + t.amount, 0);
 
     const categoryMap = new Map<string, number>();
     filtered.filter(t => t.type === 'EXPENSE').forEach(t => {
@@ -163,6 +265,9 @@ const App: React.FC = () => {
       totalIncome: income,
       totalExpense: expense,
       balance: income - expense,
+      realizedIncome,
+      realizedExpense,
+      realizedBalance: realizedIncome - realizedExpense,
       byCategory,
       transactions: filtered.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     };
@@ -268,7 +373,10 @@ const App: React.FC = () => {
           </div>
 
           <button 
-            onClick={() => setShowTransForm(true)}
+            onClick={() => {
+              setEditingTransaction(null);
+              setShowTransForm(true);
+            }}
             className="bg-brand-600 hover:bg-brand-700 text-white px-6 py-2.5 rounded-lg shadow-lg shadow-brand-500/30 flex items-center justify-center gap-2 font-medium transition-transform active:scale-95"
           >
             <Plus className="w-5 h-5" /> Nova Transação
@@ -289,6 +397,7 @@ const App: React.FC = () => {
                <table className="w-full text-left">
                  <thead className="bg-slate-50 border-b border-slate-200">
                    <tr>
+                     <th className="px-6 py-4 font-semibold text-slate-600 text-sm w-12 text-center">St</th>
                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Data</th>
                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Descrição</th>
                      <th className="px-6 py-4 font-semibold text-slate-600 text-sm">Categoria</th>
@@ -299,7 +408,7 @@ const App: React.FC = () => {
                  <tbody className="divide-y divide-slate-100">
                    {summary.transactions.length === 0 ? (
                      <tr>
-                       <td colSpan={5} className="px-6 py-8 text-center text-slate-400">
+                       <td colSpan={6} className="px-6 py-8 text-center text-slate-400">
                          Nenhuma transação encontrada neste mês.
                        </td>
                      </tr>
@@ -308,12 +417,25 @@ const App: React.FC = () => {
                        const category = categories.find(c => c.id === t.categoryId);
                        const subCategory = category?.subCategories.find(s => s.id === t.subCategoryId);
                        return (
-                         <tr key={t.id} className="hover:bg-slate-50/50 transition-colors">
+                         <tr key={t.id} className="hover:bg-slate-50/50 transition-colors group">
+                           <td className="px-6 py-4 text-center">
+                              {t.status === 'COMPLETED' ? (
+                                <span title="Efetivado" className="inline-flex">
+                                  <CheckCircle2 className="w-5 h-5 text-green-500" />
+                                </span>
+                              ) : (
+                                <span title="Pendente/Previsto" className="inline-flex">
+                                  <CircleDashed className="w-5 h-5 text-slate-300" />
+                                </span>
+                              )}
+                           </td>
                            <td className="px-6 py-4 text-slate-600 text-sm">
                              {new Date(t.date).toLocaleDateString('pt-BR')}
                            </td>
                            <td className="px-6 py-4">
-                             <div className="text-slate-800 font-medium">{t.description}</div>
+                             <div className={`font-medium ${t.status === 'COMPLETED' ? 'text-slate-800' : 'text-slate-500 italic'}`}>
+                                {t.description}
+                             </div>
                              {t.installmentTotal && (
                                <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">
                                  {t.installmentCurrent}/{t.installmentTotal}
@@ -330,18 +452,27 @@ const App: React.FC = () => {
                                )}
                              </div>
                            </td>
-                           <td className={`px-6 py-4 text-right font-bold ${t.type === 'INCOME' ? 'text-green-600' : 'text-red-600'}`}>
+                           <td className={`px-6 py-4 text-right font-bold ${t.type === 'INCOME' ? 'text-green-600' : 'text-red-600'} ${t.status === 'PENDING' ? 'opacity-60' : ''}`}>
                              {t.type === 'EXPENSE' ? '- ' : '+ '}
                              R$ {t.amount.toFixed(2)}
                            </td>
                            <td className="px-6 py-4 text-center">
-                              <button 
-                                onClick={() => handleDeleteTransaction(t.id)}
-                                className="text-slate-400 hover:text-red-500 transition-colors"
-                                title="Excluir"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              <div className="flex items-center justify-center gap-2">
+                                <button 
+                                  onClick={() => openEditModal(t)}
+                                  className="text-slate-400 hover:text-brand-600 transition-colors"
+                                  title="Editar / Confirmar Pagamento"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteTransaction(t.id)}
+                                  className="text-slate-400 hover:text-red-500 transition-colors"
+                                  title="Excluir"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                            </td>
                          </tr>
                        );
@@ -358,9 +489,10 @@ const App: React.FC = () => {
       {/* Modals */}
       {showTransForm && (
         <TransactionForm 
-          categories={categories} 
+          categories={categories}
+          initialData={editingTransaction || undefined}
           onClose={() => setShowTransForm(false)} 
-          onSave={handleAddTransaction}
+          onSave={handleSaveTransaction}
         />
       )}
 
