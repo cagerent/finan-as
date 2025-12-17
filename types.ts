@@ -1,4 +1,5 @@
 export type TransactionType = 'EXPENSE' | 'INCOME';
+export type TransactionStatus = 'PENDING' | 'COMPLETED';
 
 export interface SubCategory {
   id: string;
@@ -19,6 +20,7 @@ export interface Transaction {
   description: string;
   amount: number;
   type: TransactionType;
+  status: TransactionStatus;
   categoryId: string;
   subCategoryId?: string;
   installmentCurrent?: number;
@@ -26,9 +28,14 @@ export interface Transaction {
 }
 
 export interface FinancialSummary {
-  totalIncome: number;
-  totalExpense: number;
-  balance: number;
+  totalIncome: number; // Total Previsto
+  totalExpense: number; // Total Previsto
+  balance: number; // Saldo Previsto
+  
+  realizedIncome: number; // Apenas Recebidos
+  realizedExpense: number; // Apenas Pagos
+  realizedBalance: number; // Saldo Atual Real
+
   byCategory: { name: string; value: number; color: string }[];
   transactions: Transaction[];
 }
