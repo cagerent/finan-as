@@ -21,25 +21,30 @@ export const generateFinancialInsights = async (
     .join('\n');
 
   const prompt = `
-    Você é um consultor financeiro familiar especialista e empático.
+    Atue como um Consultor Financeiro Pessoal de elite, especializado no mercado brasileiro.
     Analise os dados financeiros abaixo referentes ao mês de ${monthName}.
     
-    Resumo:
-    - Total Receitas: R$ ${summary.totalIncome.toFixed(2)}
-    - Total Despesas: R$ ${summary.totalExpense.toFixed(2)}
-    - Saldo: R$ ${summary.balance.toFixed(2)}
+    DADOS DO CLIENTE:
+    - Total Receitas (Previsto): R$ ${summary.totalIncome.toFixed(2)}
+    - Total Receitas (Já realizado): R$ ${summary.realizedIncome.toFixed(2)}
+    - Total Despesas (Previsto): R$ ${summary.totalExpense.toFixed(2)}
+    - Total Despesas (Já Pago): R$ ${summary.realizedExpense.toFixed(2)}
+    - Saldo Projetado (Final do mês): R$ ${summary.balance.toFixed(2)}
+    - Saldo Atual (Real): R$ ${summary.realizedBalance.toFixed(2)}
     
-    Gastos por Categoria:
+    DETALHE DOS GASTOS (PROJETADO POR CATEGORIA):
     ${categorySummary}
     
-    Por favor, forneça:
-    1. Uma breve análise da saúde financeira deste mês.
-    2. Identifique onde estão os maiores gastos.
-    3. Dê 3 dicas práticas e acionáveis para economizar ou investir melhor no próximo mês, considerando o contexto brasileiro.
+    SUA MISSÃO:
+    1. **Diagnóstico do Orçamento:** Analise se a previsão fecha no azul ou no vermelho. O saldo projetado é positivo?
+    2. **Análise de Execução:** Estamos gastando conforme o planejado? (Compare Realizado vs Previsto se relevante).
+    3. **Análise de Ofensores:** Identifique qual categoria está drenando o orçamento.
+    4. **Plano de Ação (Brasil):**
+       - Sugira onde cortar se a projeção for negativa.
+       - Sugira investimentos (Selic/CDI/FIIs) se a projeção for positiva.
     
-    Se o saldo for negativo, seja encorajador mas firme sobre a necessidade de cortes.
-    Se for positivo, sugira como investir o excedente.
-    Mantenha a resposta concisa, usando formatação Markdown.
+    TOM DE VOZ:
+    Seja direto, profissional, mas motivador. Use formatação Markdown (negrito, listas) para facilitar a leitura.
   `;
 
   try {
@@ -47,7 +52,8 @@ export const generateFinancialInsights = async (
       model: 'gemini-2.5-flash',
       contents: prompt,
       config: {
-        systemInstruction: "Você é um assistente financeiro pessoal, focado em ajudar famílias a prosperar financeiramente.",
+        temperature: 0.7, // Um pouco mais criativo, mas ainda focado
+        systemInstruction: "Você é um especialista em finanças pessoais do Brasil. Você entende de inflação, taxa Selic, CDI e custo de vida brasileiro. Seja objetivo.",
       }
     });
     
