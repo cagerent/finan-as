@@ -146,6 +146,7 @@ export const api = {
       description: t.description,
       amount: Number(t.amount),
       type: t.type,
+      status: t.status || 'COMPLETED', // Default para manter compatibilidade se o campo estiver vazio
       categoryId: t.category_id,
       subCategoryId: t.sub_category_id,
       installmentCurrent: t.installment_current,
@@ -162,13 +163,36 @@ export const api = {
       description: t.description,
       amount: t.amount,
       type: t.type,
+      // Ensure status is explicitly passed, defaulting to COMPLETED if somehow undefined
+      status: t.status || 'COMPLETED',
       category_id: t.categoryId,
-      sub_category_id: t.subCategoryId,
-      installment_current: t.installmentCurrent,
-      installment_total: t.installmentTotal
+      // Use || null to ensure undefined is not sent, preventing potential JSON issues
+      sub_category_id: t.subCategoryId || null,
+      installment_current: t.installmentCurrent || null,
+      installment_total: t.installmentTotal || null
     }));
     
     const { error } = await supabase.from('transactions').insert(dbData);
+    if (error) throw error;
+  },
+
+  async updateTransaction(transaction: Transaction): Promise<void> {
+    if (!isSupabaseConfigured()) return;
+
+    const dbData = {
+      date: transaction.date,
+      description: transaction.description,
+      amount: transaction.amount,
+      type: transaction.type,
+      status: transaction.status || 'COMPLETED',
+      category_id: transaction.categoryId,
+      sub_category_id: transaction.subCategoryId || null,
+      // Add missing fields for update
+      installment_current: transaction.installmentCurrent || null,
+      installment_total: transaction.installmentTotal || null
+    };
+
+    const { error } = await supabase.from('transactions').update(dbData).eq('id', transaction.id);
     if (error) throw error;
   },
 
